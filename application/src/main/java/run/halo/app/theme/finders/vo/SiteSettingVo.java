@@ -1,6 +1,7 @@
 package run.halo.app.theme.finders.vo;
 
 import java.net.URL;
+import java.util.Locale;
 import java.util.Map;
 import lombok.Builder;
 import lombok.Value;
@@ -25,11 +26,16 @@ public class SiteSettingVo {
     @With
     URL url;
 
+    @With
+    String version;
+
     String subtitle;
 
     String logo;
 
     String favicon;
+
+    String language;
 
     Boolean allowRegistration;
 
@@ -70,7 +76,8 @@ public class SiteSettingVo {
             .subtitle(basicSetting.getSubtitle())
             .logo(basicSetting.getLogo())
             .favicon(basicSetting.getFavicon())
-            .allowRegistration(userSetting.getAllowRegistration())
+            .allowRegistration(userSetting.isAllowRegistration())
+            .language(basicSetting.useSystemLocale().orElse(Locale.getDefault()).toLanguageTag())
             .post(PostSetting.builder()
                 .postPageSize(postSetting.getPostPageSize())
                 .archivePageSize(postSetting.getArchivePageSize())

@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEvent;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.context.event.EventListener;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
@@ -15,7 +15,6 @@ import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.SchemeInitializedEvent;
 import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.theme.DefaultTemplateEnum;
@@ -38,7 +37,8 @@ import run.halo.app.theme.router.factories.TagsRouteFactory;
  */
 @Component
 @RequiredArgsConstructor
-public class ThemeCompositeRouterFunction implements RouterFunction<ServerResponse> {
+public class ThemeCompositeRouterFunction
+    implements RouterFunction<ServerResponse>, SmartLifecycle {
     private final SystemConfigurableEnvironmentFetcher environmentFetcher;
 
     private final ArchiveRouteFactory archiveRouteFactory;
@@ -51,6 +51,7 @@ public class ThemeCompositeRouterFunction implements RouterFunction<ServerRespon
     private final IndexRouteFactory indexRouteFactory;
 
     private List<RouterFunction<ServerResponse>> cachedRouters = List.of();
+    private volatile boolean running;
 
     @Override
     @NonNull
@@ -90,11 +91,34 @@ public class ThemeCompositeRouterFunction implements RouterFunction<ServerRespon
     /**
      * Refresh the {@link #cachedRouters} when the permalink rule is changed.
      *
-     * @param event {@link SchemeInitializedEvent} or {@link PermalinkRuleChangedEvent}
+     * @param event {@link PermalinkRuleChangedEvent}
      */
-    @EventListener({SchemeInitializedEvent.class, PermalinkRuleChangedEvent.class})
-    public void onSchemeInitializedEvent(@NonNull ApplicationEvent event) {
+    @EventListener
+    public void onPermalinkRuleChanged(PermalinkRuleChangedEvent event) {
         this.cachedRouters = routerFunctions();
+    }
+
+    @Override
+    public void start() {
+        if (running) {
+            return;
+        }
+        running = true;
+        this.cachedRouters = routerFunctions();
+    }
+
+    @Override
+    public void stop() {
+        if (!running) {
+            return;
+        }
+        running = false;
+        this.cachedRouters = List.of();
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 
     record RoutePattern(DefaultTemplateEnum identifier, String pattern) {

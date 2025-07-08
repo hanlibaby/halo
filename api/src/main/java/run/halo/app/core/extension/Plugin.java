@@ -78,6 +78,8 @@ public class Plugin extends AbstractExtension {
 
         private String repo;
 
+        private String issues;
+
         private String description;
 
         private List<License> license;
@@ -86,9 +88,6 @@ public class Plugin extends AbstractExtension {
          * SemVer format.
          */
         private String requires = "*";
-
-        @Deprecated
-        private String pluginClass;
 
         private Boolean enabled = false;
 
@@ -110,11 +109,13 @@ public class Plugin extends AbstractExtension {
     @Data
     public static class PluginStatus {
 
-        private PluginState phase;
+        private Phase phase;
 
         private ConditionList conditions;
 
         private Instant lastStartTime;
+
+        private PluginState lastProbeState;
 
         private String entry;
 
@@ -132,6 +133,20 @@ public class Plugin extends AbstractExtension {
             }
             return status.getConditions();
         }
+    }
+
+    public enum Phase {
+        PENDING,
+        STARTING,
+        CREATED,
+        DISABLING,
+        DISABLED,
+        RESOLVED,
+        STARTED,
+        STOPPED,
+        FAILED,
+        UNKNOWN,
+        ;
     }
 
     @Data

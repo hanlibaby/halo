@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -27,7 +28,7 @@ import java.util.Set;
  */
 @JsonSerialize(using = JsonExtension.ObjectNodeExtensionSerializer.class)
 @JsonDeserialize(using = JsonExtension.ObjectNodeExtensionDeSerializer.class)
-class JsonExtension implements Extension {
+public class JsonExtension implements Extension {
 
     private final ObjectMapper objectMapper;
 
@@ -111,10 +112,36 @@ class JsonExtension implements Extension {
         return objectNode;
     }
 
+    /**
+     * Get object mapper.
+     *
+     * @return object mapper
+     */
+    public ObjectMapper getObjectMapper() {
+        return objectMapper;
+    }
+
     public MetadataOperator getMetadataOrCreate() {
         var metadataNode = objectMapper.createObjectNode();
         objectNode.set("metadata", metadataNode);
         return new ObjectNodeMetadata(metadataNode);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        JsonExtension that = (JsonExtension) o;
+        return Objects.equals(objectNode, that.objectNode);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(objectNode);
     }
 
     class ObjectNodeMetadata implements MetadataOperator {
@@ -227,6 +254,21 @@ class JsonExtension implements Extension {
             if (finalizers != null) {
                 objectNode.set("finalizers", objectMapper.valueToTree(finalizers));
             }
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            ObjectNodeMetadata that = (ObjectNodeMetadata) o;
+            return Objects.equals(objectNode, that.objectNode);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(objectNode);
         }
     }
 }

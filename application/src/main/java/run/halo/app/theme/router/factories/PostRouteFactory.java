@@ -1,20 +1,21 @@
 package run.halo.app.theme.router.factories;
 
+import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
+import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
 import static org.springframework.web.reactive.function.server.RequestPredicates.accept;
+import static run.halo.app.content.permalinks.PostPermalinkPolicy.DEFAULT_CATEGORY;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ExecutionException;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
@@ -29,18 +30,20 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.server.i18n.LocaleContextResolver;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import run.halo.app.content.PostService;
 import run.halo.app.core.extension.content.Post;
 import run.halo.app.extension.MetadataUtil;
 import run.halo.app.extension.ReactiveExtensionClient;
+import run.halo.app.extension.index.query.QueryFactory;
 import run.halo.app.infra.exception.NotFoundException;
 import run.halo.app.infra.utils.JsonUtils;
 import run.halo.app.theme.DefaultTemplateEnum;
+import run.halo.app.theme.ViewNameResolver;
 import run.halo.app.theme.finders.PostFinder;
 import run.halo.app.theme.finders.vo.PostVo;
 import run.halo.app.theme.router.ModelMapUtils;
 import run.halo.app.theme.router.ReactiveQueryPostPredicateResolver;
 import run.halo.app.theme.router.TitleVisibilityIdentifyCalculator;
-import run.halo.app.theme.router.ViewNameResolver;
 
 /**
  * The {@link PostRouteFactory} for generate {@link RouterFunction} specific to the template
@@ -64,6 +67,7 @@ public class PostRouteFactory implements RouteFactory {
     private final TitleVisibilityIdentifyCalculator titleVisibilityIdentifyCalculator;
 
     private final LocaleContextResolver localeContextResolver;
+    private final PostService postService;
 
     @Override
     public RouterFunction<ServerResponse> create(String pattern) {
@@ -98,7 +102,8 @@ public class PostRouteFactory implements RouteFactory {
     HandlerFunction<ServerResponse> handlerFunction() {
         return request -> {
             PostPatternVariable patternVariable = PostPatternVariable.from(request);
-            return postResponse(request, patternVariable);
+            return postResponse(request, patternVariable)
+                .switchIfEmpty(Mono.error(() -> new NotFoundException("Post not found.")));
         };
     }
 
@@ -118,11 +123,22 @@ public class PostRouteFactory implements RouteFactory {
             })
             .flatMap(postVo -> {
                 Map<String, Object> model = ModelMapUtils.postModel(postVo);
-                String template = postVo.getSpec().getTemplate();
-                return viewNameResolver.resolveViewNameOrDefault(request, template,
-                        DefaultTemplateEnum.POST.getValue())
+                return determineTemplate(request, postVo)
                     .flatMap(templateName -> ServerResponse.ok().render(templateName, model));
             });
+    }
+
+    Mono<String> determineTemplate(ServerRequest request, PostVo postVo) {
+        return Flux.fromIterable(defaultIfNull(postVo.getCategories(), List.of()))
+            .filter(category -> isNotBlank(category.getSpec().getPostTemplate()))
+            .concatMap(category -> viewNameResolver.resolveViewNameOrDefault(request,
+                category.getSpec().getPostTemplate(), null)
+            )
+            .next()
+            .switchIfEmpty(Mono.defer(() -> viewNameResolver.resolveViewNameOrDefault(request,
+                postVo.getSpec().getTemplate(),
+                DefaultTemplateEnum.POST.getValue())
+            ));
     }
 
     Mono<PostVo> bestMatchPost(PostPatternVariable variable) {
@@ -135,16 +151,34 @@ public class PostRouteFactory implements RouteFactory {
                     && matchIfPresent(variable.getMonth(), labels.get(Post.ARCHIVE_MONTH_LABEL))
                     && matchIfPresent(variable.getDay(), labels.get(Post.ARCHIVE_DAY_LABEL));
             })
+            .filterWhen(post -> {
+                if (isNotBlank(variable.getCategorySlug())) {
+                    var categoryNames = post.getSpec().getCategories();
+                    return postService.listCategories(categoryNames)
+                        .next()
+                        .filter(category -> category.getSpec().getSlug()
+                            .equals(variable.getCategorySlug())
+                        )
+                        .map(category -> category.getSpec().getSlug())
+                        .switchIfEmpty(Mono.defer(() -> {
+                            if (DEFAULT_CATEGORY.equals(variable.getCategorySlug())) {
+                                return Mono.just(DEFAULT_CATEGORY);
+                            }
+                            return Mono.empty();
+                        }))
+                        .hasElement();
+                }
+                return Mono.just(true);
+            })
             .next()
-            .flatMap(post -> postFinder.getByName(post.getMetadata().getName()))
-            .switchIfEmpty(Mono.error(new NotFoundException("Post not found")));
+            .flatMap(post -> postFinder.getByName(post.getMetadata().getName()));
     }
 
     Flux<Post> postsByPredicates(PostPatternVariable patternVariable) {
-        if (StringUtils.isNotBlank(patternVariable.getName())) {
+        if (isNotBlank(patternVariable.getName())) {
             return fetchPostsByName(patternVariable.getName());
         }
-        if (StringUtils.isNotBlank(patternVariable.getSlug())) {
+        if (isNotBlank(patternVariable.getSlug())) {
             return fetchPostsBySlug(patternVariable.getSlug());
         }
         return Flux.empty();
@@ -159,11 +193,14 @@ public class PostRouteFactory implements RouteFactory {
     }
 
     private Flux<Post> fetchPostsBySlug(String slug) {
-        return queryPostPredicateResolver.getPredicate()
-            .flatMapMany(predicate -> client.list(Post.class,
-                predicate.and(post -> matchIfPresent(slug, post.getSpec().getSlug())),
-                null)
-            );
+        return queryPostPredicateResolver.getListOptions()
+            .flatMapMany(listOptions -> {
+                if (isNotBlank(slug)) {
+                    var other = QueryFactory.equal("spec.slug", slug);
+                    listOptions.setFieldSelector(listOptions.getFieldSelector().andQuery(other));
+                }
+                return client.listAll(Post.class, listOptions, Sort.unsorted());
+            });
     }
 
     private boolean matchIfPresent(String variable, String target) {
@@ -177,6 +214,7 @@ public class PostRouteFactory implements RouteFactory {
         String year;
         String month;
         String day;
+        String categorySlug;
 
         static PostPatternVariable from(ServerRequest request) {
             Map<String, String> variables = mergedVariables(request);
@@ -199,9 +237,6 @@ public class PostRouteFactory implements RouteFactory {
     @Getter
     static class PatternParser {
         private static final Pattern PATTERN_COMPILE = Pattern.compile("([^&?]*)=\\{(.*?)\\}(&|$)");
-        private static final Cache<String, Matcher> MATCHER_CACHE = CacheBuilder.newBuilder()
-            .maximumSize(5)
-            .build();
 
         private final String pattern;
         private String paramName;
@@ -210,21 +245,13 @@ public class PostRouteFactory implements RouteFactory {
 
         PatternParser(String pattern) {
             this.pattern = pattern;
-            Matcher matcher = patternToMatcher(pattern);
+            var matcher = PATTERN_COMPILE.matcher(pattern);
             if (matcher.find()) {
                 this.paramName = matcher.group(1);
                 this.placeholderName = matcher.group(2);
                 this.isQueryParamPattern = true;
             } else {
                 this.isQueryParamPattern = false;
-            }
-        }
-
-        Matcher patternToMatcher(String pattern) {
-            try {
-                return MATCHER_CACHE.get(pattern, () -> PATTERN_COMPILE.matcher(pattern));
-            } catch (ExecutionException e) {
-                throw new RuntimeException(e);
             }
         }
 

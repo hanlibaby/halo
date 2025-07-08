@@ -8,8 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,7 +16,7 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -140,6 +139,47 @@ class DefaultControllerTest {
         }
 
         @Test
+        void canReRunIfReconcilerThrowRequeueException() throws InterruptedException {
+            when(queue.take()).thenReturn(new DelayedEntry<>(
+                    new Request("fake-request"), Duration.ofSeconds(1), () -> now
+                ))
+                .thenThrow(InterruptedException.class);
+            when(queue.add(any())).thenReturn(true);
+            var expectException = new RequeueException(Result.requeue(Duration.ofSeconds(2)));
+            when(reconciler.reconcile(any(Request.class))).thenThrow(expectException);
+
+            controller.new Worker().run();
+
+            verify(synchronizer).start();
+            verify(queue, times(2)).take();
+            verify(queue).done(any());
+            verify(queue).add(argThat(de ->
+                de.getEntry().name().equals("fake-request")
+                    && de.getRetryAfter().equals(Duration.ofSeconds(2))));
+            verify(reconciler).reconcile(any(Request.class));
+        }
+
+        @Test
+        void doNotReRunIfReconcilerThrowsRequeueExceptionWithoutRequeue()
+            throws InterruptedException {
+            when(queue.take()).thenReturn(new DelayedEntry<>(
+                    new Request("fake-request"), Duration.ofSeconds(1), () -> now
+                ))
+                .thenThrow(InterruptedException.class);
+            var expectException = new RequeueException(Result.doNotRetry());
+            when(reconciler.reconcile(any(Request.class))).thenThrow(expectException);
+
+            controller.new Worker().run();
+
+            verify(synchronizer).start();
+            verify(queue, times(2)).take();
+            verify(queue).done(any());
+
+            verify(queue, never()).add(any());
+            verify(reconciler).reconcile(any(Request.class));
+        }
+
+        @Test
         void shouldSetMinRetryAfterWhenTakeZeroDelayedEntry() throws InterruptedException {
             when(queue.take()).thenReturn(new DelayedEntry<>(
                     new Request("fake-request"), minRetryAfter.minusMillis(1), () -> now
@@ -193,13 +233,16 @@ class DefaultControllerTest {
 
         verify(synchronizer, times(1)).dispose();
         verify(queue, times(1)).dispose();
-        verify(executor, times(1)).shutdownNow();
+        verify(executor).shutdown();
+        verify(executor, never()).shutdownNow();
         verify(executor, times(1)).awaitTermination(anyLong(), any());
     }
 
     @Test
     void shouldDisposeCorrectlyEvenIfTimeoutAwaitTermination() throws InterruptedException {
-        when(executor.awaitTermination(anyLong(), any())).thenThrow(InterruptedException.class);
+        when(executor.awaitTermination(anyLong(), any()))
+            .thenThrow(InterruptedException.class)
+            .thenReturn(true);
 
         controller.dispose();
 
@@ -208,46 +251,36 @@ class DefaultControllerTest {
 
         verify(synchronizer, times(1)).dispose();
         verify(queue, times(1)).dispose();
+        verify(executor).shutdown();
         verify(executor, times(1)).shutdownNow();
-        verify(executor, times(1)).awaitTermination(anyLong(), any());
+        verify(executor, times(2)).awaitTermination(anyLong(), any());
     }
 
     @Test
-    void shouldStartCorrectly() throws InterruptedException {
-        when(executor.submit(any(Runnable.class))).thenAnswer(invocation -> {
-            doNothing().when(synchronizer).start();
-            when(queue.take()).thenThrow(InterruptedException.class);
-
-            // invoke the task really
-            ((Runnable) invocation.getArgument(0)).run();
-            return mock(Future.class);
-        });
+    void shouldStartCorrectly() {
         controller.start();
-
         assertTrue(controller.isStarted());
         assertFalse(controller.isDisposed());
 
-        verify(executor, times(1)).submit(any(Runnable.class));
-        verify(synchronizer, times(1)).start();
-        verify(queue, times(1)).take();
-        verify(reconciler, times(0)).reconcile(any());
+        verify(executor).execute(any(Runnable.class));
     }
 
     @Test
-    void shouldNotStartWhenDisposed() {
+    void shouldNotStartWhenDisposed() throws InterruptedException {
+        when(executor.awaitTermination(1, TimeUnit.MINUTES)).thenReturn(true);
         controller.dispose();
         controller.start();
         assertFalse(controller.isStarted());
         assertTrue(controller.isDisposed());
 
-        verify(executor, times(0)).submit(any(Runnable.class));
+        verify(executor, times(0)).execute(any(Runnable.class));
     }
 
     @Test
     void shouldCreateMultiWorkers() {
         controller = createController(5);
         controller.start();
-        verify(executor, times(5)).submit(any(DefaultController.Worker.class));
+        verify(executor, times(5)).execute(any(DefaultController.Worker.class));
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 import org.thymeleaf.IEngineConfiguration;
 import org.thymeleaf.TemplateEngine;
@@ -29,7 +30,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
 import run.halo.app.infra.SystemSetting;
-import run.halo.app.plugin.ExtensionComponentsFinder;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 /**
@@ -50,6 +50,9 @@ class CommentElementTagProcessorTest {
     private ExtensionGetter extensionGetter;
 
     @Mock
+    private ObjectProvider<ExtensionGetter>  extensionGetterProvider;
+
+    @Mock
     private SystemConfigurableEnvironmentFetcher environmentFetcher;
 
     private TemplateEngine templateEngine;
@@ -62,6 +65,9 @@ class CommentElementTagProcessorTest {
         templateEngine.addTemplateResolver(new TestTemplateResolver());
         lenient().when(applicationContext.getBean(eq(ExtensionGetter.class)))
             .thenReturn(extensionGetter);
+        when(applicationContext.getBeanProvider(ExtensionGetter.class))
+            .thenReturn(extensionGetterProvider);
+        when(extensionGetterProvider.getIfUnique()).thenReturn(null);
     }
 
     @Test
@@ -75,7 +81,7 @@ class CommentElementTagProcessorTest {
             .thenReturn(Mono.just(commentSetting));
         when(commentSetting.getEnable()).thenReturn(true);
 
-        when(extensionGetter.getEnabledExtensionByDefinition(eq(CommentWidget.class)))
+        when(extensionGetter.getEnabledExtensions(eq(CommentWidget.class)))
             .thenReturn(Flux.empty());
         String result = templateEngine.process("commentWidget", context);
         assertThat(result).isEqualTo("""
@@ -88,7 +94,7 @@ class CommentElementTagProcessorTest {
             </html>
             """);
 
-        when(extensionGetter.getEnabledExtensionByDefinition(eq(CommentWidget.class)))
+        when(extensionGetter.getEnabledExtensions(eq(CommentWidget.class)))
             .thenReturn(Flux.just(new DefaultCommentWidget()));
         result = templateEngine.process("commentWidget", context);
         assertThat(result).isEqualTo("""

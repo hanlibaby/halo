@@ -1,16 +1,15 @@
 package run.halo.app.theme.dialect;
 
-import java.util.Collection;
-import org.springframework.context.ApplicationContext;
-import org.springframework.core.annotation.AnnotationAwareOrderComparator;
+import static org.thymeleaf.spring6.context.SpringContextUtils.getApplicationContext;
+
 import org.thymeleaf.context.ITemplateContext;
 import org.thymeleaf.model.IModel;
 import org.thymeleaf.model.ITemplateEvent;
 import org.thymeleaf.processor.element.AbstractElementModelProcessor;
 import org.thymeleaf.processor.element.IElementModelStructureHandler;
-import org.thymeleaf.spring6.context.SpringContextUtils;
 import org.thymeleaf.templatemode.TemplateMode;
-import run.halo.app.plugin.ExtensionComponentsFinder;
+import reactor.core.publisher.Flux;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 /**
  * Global head injection processor.
@@ -43,6 +42,9 @@ public class GlobalHeadInjectionProcessor extends AbstractElementModelProcessor 
     @Override
     protected void doProcess(ITemplateContext context, IModel model,
         IElementModelStructureHandler structureHandler) {
+        if (context.containsVariable(InjectionExcluderProcessor.EXCLUDE_INJECTION_VARIABLE)) {
+            return;
+        }
 
         // note that this is important!!
         Object processedAlready = context.getVariable(PROCESS_FLAG);
@@ -71,13 +73,12 @@ public class GlobalHeadInjectionProcessor extends AbstractElementModelProcessor 
         modelToInsert.remove(0);
 
         // apply processors to modelToInsert
-        Collection<TemplateHeadProcessor> templateHeadProcessors =
-            getTemplateHeadProcessors(context);
-
-        for (TemplateHeadProcessor processor : templateHeadProcessors) {
-            processor.process(context, modelToInsert, structureHandler)
-                .block();
-        }
+        getTemplateHeadProcessors(context)
+            .concatMap(processor -> processor.process(
+                SecureTemplateContextWrapper.wrap(context), modelToInsert, structureHandler)
+            )
+            .then()
+            .block();
 
         // reset model to insert
         model.reset();
@@ -86,13 +87,12 @@ public class GlobalHeadInjectionProcessor extends AbstractElementModelProcessor 
         model.add(closeHeadTag);
     }
 
-    private Collection<TemplateHeadProcessor> getTemplateHeadProcessors(ITemplateContext context) {
-        ApplicationContext appCtx = SpringContextUtils.getApplicationContext(context);
-        ExtensionComponentsFinder componentsFinder =
-            appCtx.getBean(ExtensionComponentsFinder.class);
-        return componentsFinder.getExtensions(TemplateHeadProcessor.class)
-            .stream()
-            .sorted(AnnotationAwareOrderComparator.INSTANCE)
-            .toList();
+    private Flux<TemplateHeadProcessor> getTemplateHeadProcessors(ITemplateContext context) {
+        var extensionGetter = getApplicationContext(context).getBeanProvider(ExtensionGetter.class)
+            .getIfUnique();
+        if (extensionGetter == null) {
+            return Flux.empty();
+        }
+        return extensionGetter.getExtensions(TemplateHeadProcessor.class);
     }
 }

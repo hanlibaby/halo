@@ -18,42 +18,50 @@ class ValidationUtilsTest {
     class NameValidationTest {
         @Test
         void nullName() {
-            assertThat(ValidationUtils.validateName(null)).isFalse();
+            assertThat(validateName(null)).isFalse();
         }
 
         @Test
         void emptyUsername() {
-            assertThat(ValidationUtils.validateName("")).isFalse();
+            assertThat(validateName("")).isFalse();
         }
 
         @Test
         void startWithIllegalCharacter() {
-            assertThat(ValidationUtils.validateName("-abc")).isFalse();
+            assertThat(validateName("-abc")).isFalse();
         }
 
         @Test
         void endWithIllegalCharacter() {
-            assertThat(ValidationUtils.validateName("abc-")).isFalse();
-            assertThat(ValidationUtils.validateName("abcD")).isFalse();
+            assertThat(validateName("abc-")).isFalse();
+            assertThat(validateName("abcD")).isFalse();
         }
 
         @Test
         void middleWithIllegalCharacter() {
-            assertThat(ValidationUtils.validateName("ab?c")).isFalse();
+            assertThat(validateName("ab?c")).isFalse();
         }
 
         @Test
         void moreThan63Characters() {
-            assertThat(ValidationUtils.validateName(StringUtils.repeat('a', 64))).isFalse();
+            assertThat(validateName(StringUtils.repeat('a', 64))).isFalse();
         }
 
         @Test
         void correctUsername() {
-            assertThat(ValidationUtils.validateName("abc")).isTrue();
-            assertThat(ValidationUtils.validateName("ab-c")).isTrue();
-            assertThat(ValidationUtils.validateName("1st")).isTrue();
-            assertThat(ValidationUtils.validateName("ast1")).isTrue();
-            assertThat(ValidationUtils.validateName("ast-1")).isTrue();
+            assertThat(validateName("abc")).isTrue();
+            assertThat(validateName("ab-c")).isTrue();
+            assertThat(validateName("1st")).isTrue();
+            assertThat(validateName("ast1")).isTrue();
+            assertThat(validateName("ast-1")).isTrue();
+        }
+
+        static boolean validateName(String name) {
+            if (StringUtils.isBlank(name)) {
+                return false;
+            }
+            boolean matches = ValidationUtils.NAME_PATTERN.matcher(name).matches();
+            return matches && name.length() <= 63;
         }
     }
 }

@@ -24,6 +24,19 @@ spec:
           name: favicon
           accepts:
             - 'image/*'
+        - $formkit: select
+          label: "首选语言"
+          name: language
+          value: 'zh-CN'
+          options:
+            - label: 'English'
+              value: 'en'
+            - label: 'Español'
+              value: 'es'
+            - label: '简体中文'
+              value: 'zh-CN'
+            - label: '繁体中文'
+              value: 'zh-TW'
     - group: post
       label: 文章设置
       formSchema:
@@ -68,6 +81,17 @@ spec:
               value: 'shortUUID'
             - label: 'UUID'
               value: 'UUID'
+          help: 此选项仅在创建文章时生效，修改此选项不会影响已有文章
+        - $formkit: attachmentPolicySelect
+          name: attachmentPolicyName
+          label: "附件存储策略"
+          value: "default-policy"
+          help: 用于指定在文章编辑器中上传的默认附件存储策略
+        - $formkit: attachmentGroupSelect
+          name: attachmentGroupName
+          label: "附件存储组"
+          value: ""
+          help: 用于指定在文章编辑器中上传的默认附件存储分组
     - group: seo
       label: SEO 设置
       formSchema:
@@ -86,15 +110,32 @@ spec:
       formSchema:
         - $formkit: checkbox
           name: allowRegistration
+          id: allowRegistration
+          key: allowRegistration
           label: "开放注册"
+          value: false
+        - $formkit: checkbox
+          name: mustVerifyEmailOnRegistration
+          label: "注册需验证邮箱"
+          if: "$get(allowRegistration).value === true"
+          help: "需要确保已经正确配置邮件通知器"
           value: false
         - $formkit: roleSelect
           name: defaultRole
           label: "默认角色"
+          validation: 'required'
+          if: "$get(allowRegistration).value === true"
+          help: 用户注册之后默认为用户分配的角色
         - $formkit: attachmentPolicySelect
           name: avatarPolicy
           label: "头像存储位置"
           value: "default-policy"
+          help: 指定用户上传头像的存储策略
+        - $formkit: attachmentPolicySelect
+          name: ucAttachmentPolicy
+          label: "个人中心附件存储位置"
+          value: "default-policy"
+          help: 指定用户在个人中心上传的附件的存储位置
     - group: comment
       label: 评论设置
       formSchema:
@@ -106,6 +147,7 @@ spec:
           name: requireReviewForNew
           value: true
           label: "新评论审核"
+          help: 开启之后，新评论需要管理员审核后才会显示
         - $formkit: checkbox
           name: systemUserOnly
           value: true
@@ -113,6 +155,11 @@ spec:
     - group: routeRules
       label: 主题路由设置
       formSchema:
+        - $formkit: checkbox
+          label: "关闭主题预览"
+          value: false
+          name: disableThemePreview
+          help: "关闭后，未包含主题管理权限的用户将无法通过参数预览未激活的主题"
         - $formkit: text
           label: "分类页路由前缀"
           value: "categories"
@@ -146,6 +193,8 @@ spec:
               value: '/{year:\d{4}}/{month:\d{2}}/{slug}'
             - label: '/{year}/{month}/{day}/{slug}'
               value: '/{year:\d{4}}/{month:\d{2}}/{day:\d{2}}/{slug}'
+            - label: '/categories/{categorySlug}/{slug}'
+              value: '/categories/{categorySlug}/{slug}'
           name: post
           validation: required
     - group: codeInjection

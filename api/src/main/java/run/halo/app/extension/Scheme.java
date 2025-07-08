@@ -55,7 +55,8 @@ public record Scheme(Class<? extends Extension> type,
             new GroupVersionKind(gvk.group(), gvk.version(), gvk.kind()),
             gvk.plural(),
             gvk.singular(),
-            schema);
+            // Deep copy for schema to avoid mutation by others.
+            schema.deepCopy());
     }
 
     /**
@@ -71,5 +72,22 @@ public record Scheme(Class<? extends Extension> type,
         Assert.notNull(gvk,
             "Missing annotation " + GVK.class.getName() + " on type " + type.getName());
         return gvk;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Scheme scheme = (Scheme) o;
+        return groupVersionKind.equals(scheme.groupVersionKind);
+    }
+
+    @Override
+    public int hashCode() {
+        return groupVersionKind.hashCode();
     }
 }

@@ -1,10 +1,7 @@
 package run.halo.app.content.comment;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -12,9 +9,8 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
+import java.util.Set;
 import org.json.JSONException;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -29,24 +25,29 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import run.halo.app.content.TestPost;
+import run.halo.app.core.counter.CounterService;
+import run.halo.app.core.counter.MeterUtils;
 import run.halo.app.core.extension.Counter;
 import run.halo.app.core.extension.User;
 import run.halo.app.core.extension.content.Comment;
 import run.halo.app.core.extension.content.Post;
-import run.halo.app.core.extension.service.UserService;
+import run.halo.app.core.user.service.RoleService;
+import run.halo.app.core.user.service.UserService;
+import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.Metadata;
+import run.halo.app.extension.PageRequest;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Ref;
 import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.infra.utils.JsonUtils;
-import run.halo.app.metrics.CounterService;
-import run.halo.app.metrics.MeterUtils;
-import run.halo.app.plugin.ExtensionComponentsFinder;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
+import run.halo.app.security.authorization.AuthorityUtils;
 
 /**
  * Tests for {@link CommentServiceImpl}.
@@ -58,46 +59,25 @@ import run.halo.app.plugin.ExtensionComponentsFinder;
 class CommentServiceImplTest {
 
     @Mock
-    private SystemConfigurableEnvironmentFetcher environmentFetcher;
+    SystemConfigurableEnvironmentFetcher environmentFetcher;
 
     @Mock
-    private ReactiveExtensionClient client;
+    ReactiveExtensionClient client;
 
     @Mock
-    private UserService userService;
+    UserService userService;
 
     @Mock
-    private ExtensionComponentsFinder extensionComponentsFinder;
+    RoleService roleService;
+
+    @Mock
+    ExtensionGetter extensionGetter;
 
     @InjectMocks
-    private CommentServiceImpl commentService;
+    CommentServiceImpl commentService;
 
     @Mock
-    private CounterService counterService;
-
-    @BeforeEach
-    void setUp() {
-        SystemSetting.Comment commentSetting = getCommentSetting();
-        lenient().when(environmentFetcher.fetchComment()).thenReturn(Mono.just(commentSetting));
-
-        ListResult<Comment> comments = new ListResult<>(1, 10, 3, comments());
-        when(client.list(eq(Comment.class), any(), any(), anyInt(), anyInt()))
-            .thenReturn(Mono.just(comments));
-
-        when(userService.getUserOrGhost(eq("A-owner")))
-                .thenReturn(Mono.just(createUser("A-owner")));
-        when(userService.getUserOrGhost(eq("B-owner")))
-                .thenReturn(Mono.just(createUser("B-owner")));
-        when(client.fetch(eq(User.class), eq("C-owner")))
-            .thenReturn(Mono.empty());
-
-        PostCommentSubject postCommentSubject = Mockito.mock(PostCommentSubject.class);
-        when(extensionComponentsFinder.getExtensions(eq(CommentSubject.class)))
-            .thenReturn(List.of(postCommentSubject));
-
-        when(postCommentSubject.supports(any())).thenReturn(true);
-        when(postCommentSubject.get(eq("fake-post"))).thenReturn(Mono.just(post()));
-    }
+    CounterService counterService;
 
     private static User createUser(String name) {
         User user = new User();
@@ -112,10 +92,21 @@ class CommentServiceImplTest {
 
     @Test
     void listComment() {
+        var comments = new ListResult<Comment>(1, 10, 3, comments());
+        when(client.listBy(eq(Comment.class), any(ListOptions.class), any(PageRequest.class)))
+            .thenReturn(Mono.just(comments));
+
+        PostCommentSubject postCommentSubject = Mockito.mock(PostCommentSubject.class);
+        when(extensionGetter.getExtensions(CommentSubject.class))
+            .thenReturn(Flux.just(postCommentSubject));
+
+        when(postCommentSubject.supports(any())).thenReturn(true);
+        when(postCommentSubject.get(eq("fake-post"))).thenReturn(Mono.just(post()));
+
         when(userService.getUserOrGhost(any()))
             .thenReturn(Mono.just(ghostUser()));
-        when(userService.getUserOrGhost("A-owner"))
-            .thenReturn(Mono.just(createUser("A-owner")));
+        // when(userService.getUserOrGhost("A-owner"))
+        //     .thenReturn(Mono.just(createUser("A-owner")));
         when(userService.getUserOrGhost("B-owner"))
             .thenReturn(Mono.just(createUser("B-owner")));
 
@@ -128,8 +119,7 @@ class CommentServiceImplTest {
         ServerHttpRequest httpRequest = mock(ServerHttpRequest.class);
         when(exchange.getRequest()).thenReturn(httpRequest);
         when(httpRequest.getQueryParams()).thenReturn(queryParams);
-        Mono<ListResult<ListedComment>> listResultMono =
-            commentService.listComment(new CommentQuery(request));
+        final var listResultMono = commentService.listComment(new CommentQuery(request));
         Counter counterA = new Counter();
         counterA.setUpvote(3);
         String commentACounter = MeterUtils.nameOf(Comment.class, "A");
@@ -161,6 +151,12 @@ class CommentServiceImplTest {
     @Test
     @WithMockUser(username = "B-owner")
     void create() throws JSONException {
+        var commentSetting = getCommentSetting();
+        when(environmentFetcher.fetchComment()).thenReturn(Mono.just(commentSetting));
+        when(roleService.contains(Set.of("USER"),
+            Set.of(AuthorityUtils.COMMENT_MANAGEMENT_ROLE_NAME)))
+            .thenReturn(Mono.just(false));
+
         CommentRequest commentRequest = new CommentRequest();
         commentRequest.setRaw("fake-raw");
         commentRequest.setContent("fake-content");
@@ -170,7 +166,7 @@ class CommentServiceImplTest {
         ArgumentCaptor<Comment> captor = ArgumentCaptor.forClass(Comment.class);
 
         when(client.fetch(eq(User.class), eq("B-owner")))
-                .thenReturn(Mono.just(createUser("B-owner")));
+            .thenReturn(Mono.just(createUser("B-owner")));
         Comment commentToCreate = commentRequest.toComment();
         commentToCreate.getMetadata().setName("fake");
         Mono<Comment> commentMono = commentService.create(commentToCreate);
@@ -212,49 +208,6 @@ class CommentServiceImplTest {
                 """,
             JsonUtils.objectToJson(comment),
             true);
-    }
-
-    @Test
-    void commentPredicate() {
-        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
-        queryParams.add("keyword", "hello");
-        queryParams.add("approved", "true");
-        queryParams.add("hidden", "false");
-        queryParams.add("allowNotification", "true");
-        queryParams.add("top", "false");
-        queryParams.add("ownerKind", "User");
-        queryParams.add("ownerName", "fake-user");
-        queryParams.add("subjectKind", "Post");
-        queryParams.add("subjectName", "fake-post");
-
-        MockServerRequest request = MockServerRequest.builder()
-            .queryParams(queryParams)
-            .exchange(mock(ServerWebExchange.class))
-            .build();
-        final Predicate<Comment> predicate = new CommentQuery(request).toPredicate();
-
-        Comment comment = comment("A");
-        comment.getSpec().setRaw("hello-world");
-        comment.getSpec().setApproved(true);
-        comment.getSpec().setHidden(false);
-        comment.getSpec().setAllowNotification(true);
-        comment.getSpec().setTop(false);
-        Comment.CommentOwner commentOwner = new Comment.CommentOwner();
-        commentOwner.setKind("User");
-        commentOwner.setName("fake-user");
-        commentOwner.setDisplayName("fake-user-display-name");
-        comment.getSpec().setOwner(commentOwner);
-        comment.getSpec().setSubjectRef(Ref.of(post()));
-        assertThat(predicate.test(comment)).isTrue();
-
-        queryParams.remove("keyword");
-        queryParams.add("keyword", "nothing");
-        request = MockServerRequest.builder()
-            .queryParams(queryParams)
-            .exchange(mock(ServerWebExchange.class))
-            .build();
-        final Predicate<Comment> predicateTwo = new CommentQuery(request).toPredicate();
-        assertThat(predicateTwo.test(comment)).isFalse();
     }
 
     private List<Comment> comments() {
@@ -358,7 +311,8 @@ class CommentServiceImplTest {
                             "apiVersion": "content.halo.run/v1alpha1",
                             "kind": "Post",
                             "metadata": {
-                                "name": "fake-post"
+                                "name": "fake-post",
+                                "version": 1
                             }
                         },
                         "stats": {
@@ -403,7 +357,8 @@ class CommentServiceImplTest {
                             "apiVersion": "content.halo.run/v1alpha1",
                             "kind": "Post",
                             "metadata": {
-                                "name": "fake-post"
+                                "name": "fake-post",
+                                "version": 1
                             }
                         },
                         "stats": {
@@ -447,7 +402,8 @@ class CommentServiceImplTest {
                             "apiVersion": "content.halo.run/v1alpha1",
                             "kind": "Post",
                             "metadata": {
-                                "name": "fake-post"
+                                "name": "fake-post",
+                                "version": 1
                             }
                         },
                         "stats": {

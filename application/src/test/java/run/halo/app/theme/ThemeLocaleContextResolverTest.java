@@ -12,7 +12,7 @@ import static java.util.Locale.KOREA;
 import static java.util.Locale.UK;
 import static java.util.Locale.US;
 import static org.assertj.core.api.Assertions.assertThat;
-import static run.halo.app.theme.ThemeLocaleContextResolver.DEFAULT_PARAMETER_NAME;
+import static run.halo.app.theme.ThemeLocaleContextResolver.LANGUAGE_COOKIE_NAME;
 import static run.halo.app.theme.ThemeLocaleContextResolver.TIME_ZONE_COOKIE_NAME;
 
 import java.util.Arrays;
@@ -62,6 +62,10 @@ class ThemeLocaleContextResolverTest {
             .isEqualTo(ENGLISH);
         assertThat(this.resolver.resolveLocaleContext(exchangeForParam("zh")).getLocale())
             .isEqualTo(CHINESE);
+        assertThat(this.resolver.resolveLocaleContext(exchangeForParam("zh-CN")).getLocale())
+            .isEqualTo(CHINA);
+        assertThat(this.resolver.resolveLocaleContext(exchangeForParam("zh-cn")).getLocale())
+            .isEqualTo(CHINA);
     }
 
     @Test
@@ -173,6 +177,15 @@ class ThemeLocaleContextResolverTest {
         assertThat(this.resolver.resolveLocaleContext(exchange).getLocale()).isEqualTo(US);
     }
 
+    @Test
+    void resolveUnderminedLocale() {
+        var request = MockServerHttpRequest.get("/")
+            .header(HttpHeaders.ACCEPT_LANGUAGE, "und")
+            .build();
+        var exchange = MockServerWebExchange.from(request);
+
+        assertThat(this.resolver.resolveLocaleContext(exchange).getLocale()).isNull();
+    }
 
     private ServerWebExchange exchange(Locale... locales) {
         return MockServerWebExchange.from(
@@ -183,7 +196,7 @@ class ThemeLocaleContextResolverTest {
         return MockServerWebExchange.from(
             MockServerHttpRequest.get("").acceptLanguageAsLocales(locales)
                 .cookie(new HttpCookie(TIME_ZONE_COOKIE_NAME, "America/Adak"))
-                .cookie(new HttpCookie(DEFAULT_PARAMETER_NAME, "en")));
+                .cookie(new HttpCookie(LANGUAGE_COOKIE_NAME, "en")));
     }
 
     private ServerWebExchange exchangeForParam(String language) {

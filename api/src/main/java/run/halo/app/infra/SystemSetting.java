@@ -1,8 +1,14 @@
 package run.halo.app.infra;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.LinkedHashMap;
-import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import lombok.Data;
+import lombok.experimental.Accessors;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.convert.ApplicationConversionService;
 import run.halo.app.extension.ConfigMap;
 import run.halo.app.infra.utils.JsonUtils;
@@ -28,6 +34,7 @@ public class SystemSetting {
     public static class ThemeRouteRules {
         public static final String GROUP = "routeRules";
 
+        private boolean disableThemePreview;
         private String categories;
         private String archives;
         private String post;
@@ -61,14 +68,25 @@ public class SystemSetting {
         String subtitle;
         String logo;
         String favicon;
+        String language;
+        String externalUrl;
+
+        @JsonIgnore
+        public Optional<Locale> useSystemLocale() {
+            return Optional.ofNullable(language)
+                .filter(StringUtils::isNotBlank)
+                .map(Locale::forLanguageTag);
+        }
     }
 
     @Data
     public static class User {
         public static final String GROUP = "user";
-        Boolean allowRegistration;
+        boolean allowRegistration;
+        boolean mustVerifyEmailOnRegistration;
         String defaultRole;
         String avatarPolicy;
+        String ucAttachmentPolicy;
     }
 
     @Data
@@ -80,6 +98,9 @@ public class SystemSetting {
         Integer tagPageSize;
         Boolean review;
         String slugGenerationStrategy;
+
+        String attachmentPolicyName;
+        String attachmentGroupName;
     }
 
     @Data
@@ -107,16 +128,24 @@ public class SystemSetting {
     @Data
     public static class AuthProvider {
         public static final String GROUP = "authProvider";
-        private Set<String> enabled;
+
+        private List<AuthProviderState> states;
+
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class AuthProviderState {
+        private String name;
+        private boolean enabled;
+        private int priority;
     }
 
     /**
-     * ExtensionPointEnabled key is full qualified name of extension point and value is a list of
-     * full qualified name of implementation.
+     * ExtensionPointEnabled key is metadata name of extension point and value is a list of
+     * extension definition names.
      */
-    public static class ExtensionPointEnabled extends LinkedHashMap<String, Set<String>> {
-
-        public static final ExtensionPointEnabled EMPTY = new ExtensionPointEnabled();
+    public static class ExtensionPointEnabled extends LinkedHashMap<String, LinkedHashSet<String>> {
 
         public static final String GROUP = "extensionPointEnabled";
 

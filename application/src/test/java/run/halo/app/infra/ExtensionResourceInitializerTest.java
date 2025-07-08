@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.json.JSONException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,10 +22,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.skyscreamer.jsonassert.JSONAssert;
+import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.util.FileSystemUtils;
 import reactor.core.publisher.Mono;
-import reactor.test.StepVerifier;
 import run.halo.app.extension.GroupVersionKind;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Unstructured;
@@ -47,7 +46,7 @@ class ExtensionResourceInitializerTest {
     @Mock
     HaloProperties haloProperties;
     @Mock
-    SchemeInitializedEvent applicationReadyEvent;
+    ApplicationStartedEvent applicationStartedEvent;
 
     @Mock
     ApplicationEventPublisher eventPublisher;
@@ -120,7 +119,7 @@ class ExtensionResourceInitializerTest {
     }
 
     @Test
-    void onApplicationEvent() throws JSONException {
+    void shouldStartCorrectly() throws Exception {
         when(haloProperties.isRequiredExtensionDisabled()).thenReturn(true);
         var argumentCaptor = ArgumentCaptor.forClass(Unstructured.class);
 
@@ -128,10 +127,7 @@ class ExtensionResourceInitializerTest {
             .thenReturn(Mono.empty());
         when(extensionClient.create(any())).thenReturn(Mono.empty());
 
-        var initializeMono = extensionResourceInitializer.initialize(applicationReadyEvent);
-        StepVerifier.create(initializeMono)
-            .verifyComplete();
-
+        extensionResourceInitializer.start();
 
         verify(extensionClient, times(3)).create(argumentCaptor.capture());
 

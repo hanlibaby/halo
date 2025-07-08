@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
@@ -22,7 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import lombok.EqualsAndHashCode;
+import org.springframework.lang.NonNull;
 
 /**
  * Unstructured is a generic Extension, which wraps ObjectNode to maintain the Extension data, like
@@ -35,7 +36,12 @@ import lombok.EqualsAndHashCode;
 @SuppressWarnings("rawtypes")
 public class Unstructured implements Extension {
 
-    public static final ObjectMapper OBJECT_MAPPER = Json.mapper();
+    @SuppressWarnings("deprecation")
+    public static final ObjectMapper OBJECT_MAPPER = Json.mapper()
+        // We don't want to change the default mapper
+        // so we copy a new one and configure it
+        .copy()
+        .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
 
     private final Map data;
 
@@ -63,93 +69,115 @@ public class Unstructured implements Extension {
 
     @Override
     public MetadataOperator getMetadata() {
-        return new UnstructuredMetadata();
+        return getNestedMap(data, "metadata")
+            .map(UnstructuredMetadata::new)
+            .orElse(null);
     }
 
-    @EqualsAndHashCode(exclude = "version")
-    class UnstructuredMetadata implements MetadataOperator {
+    static class UnstructuredMetadata implements MetadataOperator {
+
+        @NonNull
+        private final Map<String, Object> metadata;
+
+        UnstructuredMetadata(@NonNull Map<String, Object> metadata) {
+            this.metadata = metadata;
+        }
 
         @Override
         public String getName() {
-            return (String) getNestedValue(data, "metadata", "name").orElse(null);
+            return (String) getNestedValue(metadata, "name").orElse(null);
         }
 
         @Override
         public String getGenerateName() {
-            return (String) getNestedValue(data, "metadata", "generateName").orElse(null);
+            return (String) getNestedValue(metadata, "generateName").orElse(null);
         }
 
         @Override
         public Map<String, String> getLabels() {
-            return getNestedStringStringMap(data, "metadata", "labels").orElse(null);
+            return getNestedStringStringMap(metadata, "labels").orElse(null);
         }
 
         @Override
         public Map<String, String> getAnnotations() {
-            return getNestedStringStringMap(data, "metadata", "annotations").orElse(null);
+            return getNestedStringStringMap(metadata, "annotations").orElse(null);
         }
 
         @Override
         public Long getVersion() {
-            return getNestedLong(data, "metadata", "version").orElse(null);
+            return getNestedLong(metadata, "version").orElse(null);
         }
 
         @Override
         public Instant getCreationTimestamp() {
-            return getNestedInstant(data, "metadata", "creationTimestamp").orElse(null);
+            return getNestedInstant(metadata, "creationTimestamp").orElse(null);
         }
 
         @Override
         public Instant getDeletionTimestamp() {
-            return getNestedInstant(data, "metadata", "deletionTimestamp").orElse(null);
+            return getNestedInstant(metadata, "deletionTimestamp").orElse(null);
         }
 
         @Override
         public Set<String> getFinalizers() {
-            return getNestedStringSet(data, "metadata", "finalizers").orElse(null);
+            return getNestedStringSet(metadata, "finalizers").orElse(null);
         }
 
         @Override
         public void setName(String name) {
-            setNestedValue(data, name, "metadata", "name");
+            setNestedValue(metadata, name, "name");
         }
 
         @Override
         public void setGenerateName(String generateName) {
-            setNestedValue(data, generateName, "metadata", "generateName");
+            setNestedValue(metadata, generateName, "generateName");
         }
 
         @Override
         public void setLabels(Map<String, String> labels) {
-            setNestedValue(data, labels, "metadata", "labels");
+            setNestedValue(metadata, labels, "labels");
         }
 
         @Override
         public void setAnnotations(Map<String, String> annotations) {
-            setNestedValue(data, annotations, "metadata", "annotations");
+            setNestedValue(metadata, annotations, "annotations");
         }
 
         @Override
         public void setVersion(Long version) {
-            setNestedValue(data, version, "metadata", "version");
+            setNestedValue(metadata, version, "version");
         }
 
         @Override
         public void setCreationTimestamp(Instant creationTimestamp) {
-            setNestedValue(data, creationTimestamp, "metadata", "creationTimestamp");
+            setNestedValue(metadata, creationTimestamp, "creationTimestamp");
         }
 
         @Override
         public void setDeletionTimestamp(Instant deletionTimestamp) {
-            setNestedValue(data, deletionTimestamp, "metadata", "deletionTimestamp");
+            setNestedValue(metadata, deletionTimestamp, "deletionTimestamp");
         }
 
         @Override
         public void setFinalizers(Set<String> finalizers) {
-            setNestedValue(data, finalizers, "metadata", "finalizers");
+            setNestedValue(metadata, finalizers, "finalizers");
         }
-    }
 
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            var that = (UnstructuredMetadata) o;
+            return Objects.equals(metadata, that.metadata);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(metadata);
+        }
+
+    }
 
     @Override
     public void setApiVersion(String apiVersion) {
@@ -220,12 +248,7 @@ public class Unstructured implements Extension {
     public static Optional<Map<String, String>> getNestedStringStringMap(Map map,
         String... fields) {
         return getNestedValue(map, fields)
-            .map(labelsObj -> {
-                var labels = (Map) labelsObj;
-                var result = new HashMap<String, String>();
-                labels.forEach((key, value) -> result.put((String) key, (String) value));
-                return result;
-            });
+            .map(labelsObj -> (Map<String, String>) labelsObj);
     }
 
     public static Optional<Instant> getNestedInstant(Map map, String... fields) {
